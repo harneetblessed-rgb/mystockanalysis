@@ -367,28 +367,40 @@ body::after {
 </div>
 
 <script>
-/* ========== CORS-PROXIED YAHOO FETCH ========== */
+/* ========== CORS-PROXIED YAHOO FETCH — 4 proxies, retry, strict JSON ========== */
 const PROXIES = [
   url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
   url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
   url => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`,
+  url => `https://thingproxy.freeboard.io/fetch/${encodeURIComponent(url)}`,
 ];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-async function fetchJson(url) {
+async function fetchJson(url, retries = 2) {
   let lastErr;
-  for (const wrap of PROXIES) {
-    try {
-      const r = await fetch(wrap(url), { cache: "no-store" });
-      if (!r.ok) { lastErr = new Error(`HTTP ${r.status}`); continue; }
-      const j = await r.json();
-      return j;
-    } catch (e) { lastErr = e; }
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) await sleep(700 * attempt);
+    for (const wrap of PROXIES) {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 10000);
+        const r = await fetch(wrap(url), { cache: "no-store", signal: ctrl.signal });
+        clearTimeout(timer);
+        if (!r.ok) { lastErr = new Error(`HTTP ${r.status}`); continue; }
+        const txt = await r.text();
+        const t = txt.trim();
+        if (!t || t[0] === '<' || t.startsWith('Edge:') || t.startsWith('Error') || t.length < 20) {
+          lastErr = new Error("Bad response: " + t.slice(0, 60)); continue;
+        }
+        return JSON.parse(txt);
+      } catch (e) { lastErr = e; }
+    }
   }
   throw lastErr || new Error("All proxies failed");
 }
 
 async function fetchYahooChart(symbol) {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2y&interval=1d`;
+  const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2y&interval=1d&includePrePost=false`;
   const j = await fetchJson(url);
   if (j?.chart?.error) throw new Error(j.chart.error.description || "Yahoo chart error");
   const r = j?.chart?.result?.[0];
@@ -397,25 +409,32 @@ async function fetchYahooChart(symbol) {
   const ts = r.timestamp || [];
   const out = { date: [], open: [], high: [], low: [], close: [], volume: [] };
   for (let i = 0; i < ts.length; i++) {
-    if (q.close[i] == null) continue;
+    if (q.close?.[i] == null) continue;
     out.date.push(new Date(ts[i] * 1000));
-    out.open.push(q.open[i]); out.high.push(q.high[i]);
-    out.low.push(q.low[i]);   out.close.push(q.close[i]);
-    out.volume.push(q.volume[i] || 0);
+    out.open.push(q.open[i] || q.close[i]); out.high.push(q.high[i] || q.close[i]);
+    out.low.push(q.low[i] || q.close[i]);   out.close.push(q.close[i]);
+    out.volume.push(q.volume?.[i] || 0);
   }
   out.meta = r.meta || {};
   return out;
 }
 
+/* Try v11 first (more reliable for fundamentals), then v10 fallbacks */
 async function fetchYahooSummary(symbol) {
-  const modules = ["summaryDetail","financialData","defaultKeyStatistics","assetProfile","price"].join(",");
-  const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}`;
-  try {
-    const j = await fetchJson(url);
-    return j?.quoteSummary?.result?.[0] || null;
-  } catch (e) {
-    return null;
+  const modules = "summaryDetail,financialData,defaultKeyStatistics,assetProfile,price,incomeStatementHistory,balanceSheetHistory";
+  const urls = [
+    `https://query2.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}&crumb=`,
+    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}`,
+    `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}`,
+  ];
+  for (const url of urls) {
+    try {
+      const j = await fetchJson(url);
+      const res = j?.quoteSummary?.result?.[0];
+      if (res && Object.keys(res).length > 0) return res;
+    } catch (e) { console.warn("fetchYahooSummary attempt failed:", e.message); }
   }
+  return null;
 }
 
 /* ========== INDICATORS ========== */
