@@ -1,0 +1,29 @@
+{
+  "name": "Terminal Analyzer",
+  "short_name": "TA",
+  "description": "Intraday + Swing stock analyzer — Fundamental & Technical signals for Indian and US markets",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0e0c0a",
+  "theme_color": "#0e0c0a",
+  "lang": "en",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
+}
